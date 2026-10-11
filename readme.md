@@ -104,6 +104,16 @@ Data scientists should be aware that these models are trained on **Low-Resource 
 ## Implementation & CLI Usage
 
 ### Setup
+The project uses [uv](https://docs.astral.sh/uv/). `pyproject.toml` declares the dependencies and the supported Python versions (3.12 and 3.13); `uv.lock` pins the complete dependency tree. The spaCy model `de_core_news_sm` is a regular dependency, so no separate download is needed.
+
 ```bash
-pip install -r requirements.txt
-python -m spacy download de_core_news_sm
+uv sync
+```
+
+Scripts run inside the project environment via `uv run`:
+
+```bash
+uv run python src/query_tool.py "Innere Sicherheit"
+```
+
+After changing `pyproject.toml`, run `uv lock` and commit both files.
