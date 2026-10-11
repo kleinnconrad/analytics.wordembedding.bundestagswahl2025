@@ -1,0 +1,70 @@
+{
+  "gensim": "4.4.0",
+  "spacy": "3.8.16",
+  "spacy_model": "de_core_news_sm",
+  "seeds": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "parties": {
+    "cdu": {
+      "sentences": 2079,
+      "tokens": 11522,
+      "vocabulary": 954,
+      "parameters": {
+        "sg": 1,
+        "vector_size": 100,
+        "window": 10,
+        "min_count": 3,
+        "negative": 10,
+        "epochs": 100,
+        "workers": 1
+      }
+    },
+    "gruene": {
+      "sentences": 2813,
+      "tokens": 22686,
+      "vocabulary": 1669,
+      "parameters": {
+        "sg": 1,
+        "vector_size": 100,
+        "window": 10,
+        "min_count": 3,
+        "negative": 10,
+        "epochs": 100,
+        "workers": 1
+      }
+    },
+    "spd": {
+      "sentences": 1781,
+      "tokens": 12634,
+      "vocabulary": 1044,
+      "parameters": {
+        "sg": 1,
+        "vector_size": 100,
+        "window": 10,
+        "min_count": 3,
+        "negative": 10,
+        "epochs": 100,
+        "workers": 1
+      }
+    },
+    "afd": {
+      "sentences": 1487,
+      "tokens": 13539,
+      "vocabulary": 1199,
+      "parameters": {
+        "sg": 1,
+        "vector_size": 100,
+        "window": 10,
+        "min_count": 3,
+        "negative": 10,
+        "epochs": 100,
+        "workers": 1
+      }
+    }
+  }
+}

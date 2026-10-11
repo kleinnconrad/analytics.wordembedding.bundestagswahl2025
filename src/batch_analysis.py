@@ -1,99 +1,148 @@
-import os
-import numpy as np
-from gensim.models import Word2Vec
+"""Compare the nearest neighbours of a set of terms across the party models.
 
-# Import your centralized NLP configuration
-from config import get_configured_nlp
+Writes
+  results/batch_results.md  the neighbours of every buzzword per party as a Markdown table
+  results/results.json      the data of the dashboard (index.html): corpus statistics and the
+                            neighbours of the buzzwords and of every word that all models know
 
-# --- Configuration & Pathing ---
-PARTIES = ["cdu", "gruene", "spd", "afd"]
+Run:  uv run python src/batch_analysis.py
+"""
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
+import json
 
-# --- 30 Political Buzzwords ---
-BUZZWORDS = [
-    "Klimaschutz", "Innere Sicherheit", "Steuern", "Migration", "Wirtschaft",
-    "Digitalisierung", "Bildung", "Rente", "Gesundheit", "Europa",
-    "Infrastruktur", "Bürokratie", "Wohnen", "Familie", "Arbeitsplätze",
-    "Soziale Gerechtigkeit", "Innovation", "Pflege", "Asyl", "Integration",
-    "Verkehr", "Umweltschutz", "Mindestlohn", "Steuerentlastung", "Bundeswehr",
-    "Demokratie", "Gleichstellung", "Ländlicher Raum", "Energiewende", "Datenschutz"
-]
+from config import BUZZWORDS, MODELS_DIR, PARTIES, RESULTS_DIR, SEEDS, TOP_N
+from ensemble import load_party
+from textproc import tokenize_query
 
-# Load the pre-configured spaCy model (with all federal stopwords already applied)
-print("Loading spaCy model and custom stopwords from config...")
-nlp = get_configured_nlp()
+# Neighbours shown per party in the Markdown table
+MARKDOWN_TOP_N = 5
+# A neighbour counts as stable if at least this many seed models rank it in their own top TOP_N
+STABLE_SEEDS = 3
 
-def preprocess_query(text):
-    """Normalizes input query to lowercase lemmas."""
-    doc = nlp(text)
-    stop_words = nlp.Defaults.stop_words
-    tokens = []
-    for token in doc:
-        lemma = token.lemma_.lower()
-        if lemma not in stop_words and token.text.lower() not in stop_words:
-            if not token.is_punct and not token.is_space and token.is_alpha:
-                if len(lemma) > 1:
-                    tokens.append(lemma)
-    return tokens
 
-def get_vector_for_phrase(model, tokens):
-    """Averages vectors for phrases."""
-    valid_vectors = [model.wv[t] for t in tokens if t in model.wv]
-    if not valid_vectors:
-        return None
-    return np.mean(valid_vectors, axis=0)
+def load_ensembles():
+    ensembles = {party: load_party(party) for party in PARTIES}
+    missing = [party for party, ensemble in ensembles.items() if ensemble is None]
+    if missing:
+        raise SystemExit(f"Models not found for {', '.join(missing)} (run src/preprocess.py)")
+    return ensembles
+
+
+def neighbours_by_party(ensembles, tokens):
+    result = {}
+    for party, ensemble in ensembles.items():
+        neighbours = ensemble.neighbours(tokens)
+        result[party] = None if neighbours is None else [
+            [word, round(similarity, 3), seeds] for word, similarity, seeds in neighbours
+        ]
+    return result
+
+
+def build_results(ensembles):
+    summary = json.loads((MODELS_DIR / "training_summary.json").read_text(encoding="utf-8"))
+    shared = sorted(set.intersection(*(set(e.vocab) for e in ensembles.values())))
+
+    terms = {}
+    buzzwords = []
+    for phrase in BUZZWORDS:
+        tokens = tokenize_query(phrase)
+        key = " ".join(tokens)
+        buzzword = {"label": phrase, "key": key}
+        # Phrases of which only some tokens are in a party's vocabulary are queried with those tokens
+        unknown = {party: missing for party, ensemble in ensembles.items()
+                   if (missing := [t for t in tokens if t not in ensemble]) and len(missing) < len(tokens)}
+        if unknown:
+            buzzword["unknown"] = unknown
+        buzzwords.append(buzzword)
+        terms[key] = neighbours_by_party(ensembles, tokens)
+    for word in shared:
+        if word not in terms:
+            terms[word] = neighbours_by_party(ensembles, [word])
+
+    parties = []
+    for party, name in PARTIES.items():
+        stats = summary["parties"][party]
+        parties.append({
+            "id": party,
+            "name": name,
+            "sentences": stats["sentences"],
+            "tokens": stats["tokens"],
+            "vocabulary": stats["vocabulary"],
+            "seed_agreement": round(ensembles[party].seed_agreement(shared), 2),
+        })
+
+    return {
+        "parameters": summary["parties"][next(iter(PARTIES))]["parameters"],
+        "seeds": SEEDS,
+        "top_n": TOP_N,
+        "stable_seeds": STABLE_SEEDS,
+        "shared_vocabulary": len(shared),
+        "parties": parties,
+        "buzzwords": buzzwords,
+        "terms": terms,
+    }
+
+
+def format_cell(neighbours):
+    if neighbours is None:
+        return "–"
+    words = [word if seeds >= STABLE_SEEDS else f"({word})" for word, _, seeds in neighbours[:MARKDOWN_TOP_N]]
+    return ", ".join(words)
+
+
+def write_markdown(results, path):
+    names = [p["name"] for p in results["parties"]]
+    n_seeds = len(results["seeds"])
+    lines = [
+        "# Batch Results",
+        "",
+        "Generated by `src/batch_analysis.py`. The interactive version is the "
+        "[dashboard](https://kleinnconrad.github.io/wordembedding-bundestagswahl-2025/).",
+        "",
+        "## Table of Contents",
+        "* [Corpora](#corpora)",
+        "* [Nearest Neighbours](#nearest-neighbours)",
+        "",
+        "## Corpora",
+        "",
+        "| Party | Sentences | Tokens | Vocabulary | Seed agreement |",
+        "| :--- | ---: | ---: | ---: | ---: |",
+    ]
+    for p in results["parties"]:
+        lines.append(f"| {p['name']} | {p['sentences']:,} | {p['tokens']:,} | {p['vocabulary']:,} "
+                     f"| {p['seed_agreement']:.0%} |")
+    lines += [
+        "",
+        f"Seed agreement: the share of the top {results['top_n']} neighbours that two models of the same "
+        f"party, trained with different seeds, have in common (mean over the "
+        f"{results['shared_vocabulary']} words that all four models know).",
+        "",
+        "## Nearest Neighbours",
+        "",
+        f"The {MARKDOWN_TOP_N} nearest neighbours of each term, ranked by the cosine similarity averaged "
+        f"over {n_seeds} seed models. Words in parentheses are unstable: fewer than {STABLE_SEEDS} of "
+        f"{n_seeds} seed models rank them in their own top {results['top_n']}. "
+        "A dash means that the term is not in the vocabulary (fewer than "
+        f"{results['parameters']['min_count']} occurrences).",
+        "",
+        f"| Term | Lemma | {' | '.join(names)} |",
+        f"| :--- | :--- |{' :--- |' * len(names)}",
+    ]
+    for buzzword in results["buzzwords"]:
+        cells = [format_cell(results["terms"][buzzword["key"]][p["id"]]) for p in results["parties"]]
+        lines.append(f"| {buzzword['label']} | {buzzword['key']} | {' | '.join(cells)} |")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
 
 def run_batch_analysis():
-    print(f"\nRunning batch analysis for {len(BUZZWORDS)} buzzwords...\n")
+    results = build_results(load_ensembles())
+    RESULTS_DIR.mkdir(exist_ok=True)
+    (RESULTS_DIR / "results.json").write_text(
+        json.dumps(results, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
+    write_markdown(results, RESULTS_DIR / "batch_results.md")
+    print(f"{len(results['buzzwords'])} buzzwords and {results['shared_vocabulary']} shared words "
+          f"written to results/results.json and results/batch_results.md")
 
-    for party in PARTIES:
-        model_path = os.path.join(MODELS_DIR, f"{party}.model")
-        if not os.path.exists(model_path):
-            print(f"[{party.upper()}] Model not found in {MODELS_DIR}. Skipping.\n")
-            continue
-
-        model = Word2Vec.load(model_path)
-        
-        # Print Table Header
-        print(f"{'='*105}")
-        print(f" {party.upper()} - Top 3 Semantic Associations")
-        print(f"{'='*105}")
-        print(f"| {'Buzzword':<22} | {'Match 1 (Dist)':<23} | {'Match 2 (Dist)':<23} | {'Match 3 (Dist)':<23} |")
-        print(f"|{'-'*24}|{'-'*25}|{'-'*25}|{'-'*25}|")
-
-        for word in BUZZWORDS:
-            query_tokens = preprocess_query(word)
-            
-            if not query_tokens:
-                print(f"| {word:<22} | {'Invalid/Stopword':<75} |")
-                continue
-
-            query_vec = get_vector_for_phrase(model, query_tokens)
-
-            if query_vec is None:
-                print(f"| {word:<22} | {'Not in Vocabulary':<75} |")
-                continue
-
-            # Fetch extra results to allow filtering out the query terms
-            raw_results = model.wv.most_similar(positive=[query_vec], topn=15)
-            filtered_results = [(w, sim) for w, sim in raw_results if w not in query_tokens][:3]
-
-            # Format the output row
-            cols = []
-            for match_word, similarity in filtered_results:
-                distance = 1 - similarity
-                cols.append(f"{match_word} ({distance:.3f})")
-            
-            # Fill empty slots if less than 3 matches were found (highly unlikely but safe)
-            while len(cols) < 3:
-                cols.append("N/A")
-
-            print(f"| {word:<22} | {cols[0]:<23} | {cols[1]:<23} | {cols[2]:<23} |")
-            
-        print(f"{'='*105}\n")
 
 if __name__ == "__main__":
     run_batch_analysis()
