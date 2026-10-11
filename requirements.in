@@ -1,5 +1,0 @@
-gensim==4.4.0
-spacy==3.8.16
-numpy==2.5.3
-pdfplumber==0.11.10
-scipy

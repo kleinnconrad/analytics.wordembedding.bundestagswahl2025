@@ -1,38 +1,47 @@
-# Knowing what is meant! Knowing the context!
+# Meaning Through Context
+
+## Table of Contents
+* [Overview](#overview)
+* [The Core Idea: Context Over Word Counts](#the-core-idea-context-over-word-counts)
+* [Methodology: Discovering Meaning through Vectors](#methodology-discovering-meaning-through-vectors)
+* [The Analytical Pipeline](#the-analytical-pipeline)
 
 ## Overview
-This repository focuses on developing a core capability in the "machine understanding" of political language. When analyzing election programs, the primary objective is to move beyond simple keyword counting and literal text interpretation to genuinely understand **what a political party actually means** when they use specific terminology. This project serves as a dedicated pipeline to explore the semantic landscapes of the 2025 Bundestags election.
+This repository applies word embeddings to political language. When analyzing election programs, the objective is to go beyond keyword counts and to examine **in which context a party uses a term**. The pipeline compares the election programs of CDU/CSU, Grüne, SPD and AfD for the 2025 Bundestag election.
 
 ---
 
-## The Core Philosophy: Meaning Over Words
-Traditionally, political text analysis relies on manually curated lists of keywords or simple frequency counts (e.g., "How often did the CDU mention 'Wirtschaft'?"). This approach is fundamentally limited because it depends entirely on human assumption and misses the surrounding context.
+## The Core Idea: Context Over Word Counts
+Political text analysis often relies on curated keyword lists or frequency counts (e.g. "How often does the CDU mention 'Wirtschaft'?"). A count shows that a term is used, but not in which context, and the keyword list depends on the assumptions of the analyst.
 
-By applying word embeddings, we are challenging this paradigm by asking:
-* Can a machine discover related political concepts and thematic priorities that human analysts might overlook?
-* Does the machine possess a unique, data-driven "perspective" on a party's ideology based purely on their sentence structure?
+Word embeddings address two questions:
+* Which terms does a program use in the same contexts as a given term, including terms an analyst would not have searched for?
+* How do these contexts differ between the parties?
 
 ### The "Anti-Thesaurus" Principle
-It is crucial to understand what this system is *not*. **The model is more than just a simple thesaurus, and it definitely shouldn't act like one.** The goal of this repository is not to find literal word-for-word replacements. Instead, the focus is on understanding the surrounding semantic intent and the context in which words are used. When the SPD and the AfD both mention "Klimaschutz," they do not mean the same thing. By mapping these terms contextually, we reveal the *actual* intent behind the political buzzwords.
+The model is not a thesaurus. Its neighbours are not synonyms but words that occur in similar contexts. This is the intended behaviour: when two parties use the same word, the neighbours show the different contexts. For "Klimaschutz", the five nearest neighbours are:
+* **SPD:** verfolgen, künstliche, erneuerbar, erhalt, nachhaltigkeit
+* **AfD:** filmförderung, verankern, vermeintlich, name, klima
+
+The neighbours are indications that have to be checked in the source text. Several of them are only interpretable together with the sentences in which they occur.
 
 ---
 
 ## Methodology: Discovering Meaning through Vectors
-To uncover what a party might mean, we utilize an artificial neural network (Word2Vec) trained independently on each party's text corpus.
+A separate skip-gram Word2Vec model (a shallow neural network) is trained on each party's program.
 
-1.  **Vector Generation:** The model generates a mathematical vector for every relevant term in the election program. This vector serves as a numerical representation of the term's context within that specific party's platform.
-2.  **Contextual Similarity:** We calculate the angle between these "word vectors" (Cosine Distance). Terms that appear in similar or identical contexts will have a smaller angle between their vectors. The smaller the angle, the more similar the context.
+1. **Vector generation:** The model assigns a 100-dimensional vector to every word that occurs at least three times in the program. The vector is learned by predicting the surrounding words of each occurrence.
+2. **Contextual similarity:** The cosine of the angle between two vectors measures how similar the contexts of the two words are. The smaller the angle, the more similar the contexts.
 
 ---
 
 ## The Analytical Pipeline
-Instead of manually guessing synonyms, we use the machine to surface contextual relationships through a three-step process:
 
-### 1. Training the Perspective
-We train separate continuous bag-of-words/skip-gram models on the raw text of each party (CDU, Grüne, SPD, AfD). This ensures the machine learns four distinct "perspectives" without cross-contamination.
+### 1. Training One Model per Party
+Each program is trained separately (CDU/CSU, Grüne, SPD, AfD), so that every model reflects only the language of one program. Before training, the text is split into sentences, lemmatized, and stop words are removed. Each party is trained with five random seeds and identical parameters.
 
 ### 2. Identification
-Using the built-in Query CLI, we apply the trained models to specific political concepts (e.g., "Innere Sicherheit"). The system automatically identifies "context-similar" terms based on vector proximity, showing us exactly what concepts live in the same neighborhood as our query.
+The query tool and the dashboard return the nearest neighbours of a term (e.g. "Innere Sicherheit") in each model, averaged over the five seed models.
 
-### 3. Evaluation & Interpretation
-The machine-generated associations are then evaluated using semantic distance bins (from "Core Identity" to "Semantic Noise"). The ultimate measure of success for this tool is its ability to provide human analysts with empirical data to support political science conclusions—proving ideological divergence through mathematics rather than just subjective reading.
+### 3. Evaluation and Interpretation
+Two measures indicate how reliable a neighbour is: the mean cosine similarity and the number of seed models that return it. The corpora are small (12,000 to 23,000 tokens), so the results are exploratory: they point to differences in the use of terms that can then be verified in the programs. They do not replace reading the programs.

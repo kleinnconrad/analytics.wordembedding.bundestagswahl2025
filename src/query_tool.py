@@ -1,124 +1,48 @@
-import os
+"""Show the nearest neighbours of a word or phrase in the model of every party.
+
+Run:  uv run python src/query_tool.py "Innere Sicherheit" [--top 10]
+"""
+
 import argparse
-import numpy as np
-from gensim.models import Word2Vec
 
-# Import your centralized NLP configuration
-from config import get_configured_nlp
+from config import PARTIES, SEEDS, TOP_N
+from ensemble import load_party
+from textproc import tokenize_query
 
-# --- Configuration & Pathing ---
-PARTIES = ["cdu", "gruene", "spd", "afd"]
 
-# Get the absolute path of the current script (src/query_tool.py)
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Navigate up one level to the project root to find 'models/'
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
-
-# Load the pre-configured spaCy model (with all federal stopwords already applied)
-print("Loading spaCy model and custom stopwords from config...")
-nlp = get_configured_nlp()
-
-def get_semantic_label(distance):
-    """
-    Categorizes the strength of the association based on cosine distance.
-    Useful for qualitative analysis in a bachelor thesis.
-    """
-    if distance <= 0.25:
-        return "Core Identity"
-    elif distance <= 0.45:
-        return "Strong Association"
-    elif distance <= 0.65:
-        return "Thematic Context"
-    elif distance <= 0.80:
-        return "Weak/Incidental"
-    else:
-        return "Semantic Noise"
-
-def preprocess_query(text):
-    """
-    Normalizes input query to lowercase lemmas and filters stop words.
-    """
-    doc = nlp(text)
-    stop_words = nlp.Defaults.stop_words
-    
-    tokens = []
-    for token in doc:
-        lemma = token.lemma_.lower()
-        if lemma not in stop_words and token.text.lower() not in stop_words:
-            if not token.is_punct and not token.is_space and token.is_alpha:
-                if len(lemma) > 1:
-                    tokens.append(lemma)
-    return tokens
-
-def get_vector_for_phrase(model, tokens):
-    """
-    Averages vectors for phrases to allow multi-word synonym searches.
-    """
-    # Fetch vectors only for tokens that actually exist in the model's vocabulary
-    valid_vectors = [model.wv[t] for t in tokens if t in model.wv]
-    
-    if not valid_vectors:
-        return None
-    
-    # Return the centroid (mean) of the phrase tokens
-    return np.mean(valid_vectors, axis=0)
-
-def run_query(phrase):
-    """
-    Loads party models and prints the top 5 synonyms ranked by cosine distance,
-    including semantic labels for better interpretation.
-    """
-    query_tokens = preprocess_query(phrase)
-    
-    if not query_tokens:
-        print(f"Error: No valid words found in query '{phrase}' after cleaning.")
+def run_query(phrase, top_n):
+    tokens = tokenize_query(phrase)
+    if not tokens:
+        print(f"No words left in '{phrase}' after removing stop words.")
         return
 
-    print(f"\nAnalyzing semantic associations for: '{' '.join(query_tokens)}'")
-    print("=" * 80)
+    print(f"\nNearest neighbours of '{' '.join(tokens)}'")
+    print(f"Similarity: mean cosine similarity over {len(SEEDS)} seed models. "
+          f"Seeds: number of seed models with the word in their own top {top_n}.")
+    print("=" * 72)
 
-    for party in PARTIES:
-        model_path = os.path.join(MODELS_DIR, f"{party}.model")
-        
-        if not os.path.exists(model_path):
-            print(f"[{party.upper()}] Model file not found.")
+    for party, name in PARTIES.items():
+        ensemble = load_party(party)
+        if ensemble is None:
+            print(f"{name}: models not found (run src/preprocess.py)")
             continue
 
-        model = Word2Vec.load(model_path)
-        query_vec = get_vector_for_phrase(model, query_tokens)
-
-        if query_vec is None:
-            print(f"[{party.upper()}] Vocabulary match failed for this query.")
-            print("-" * 80)
-            continue
-
-        # Fetch more results initially to allow for filtering the search term itself
-        raw_results = model.wv.most_similar(positive=[query_vec], topn=15)
-        
-        # Filter: Remove words that are part of the original query
-        filtered_results = [
-            (word, sim) for word, sim in raw_results 
-            if word not in query_tokens
-        ][:5]
-
-        print(f"Top 5 for {party.upper()}:")
-        if not filtered_results:
-            print("  - No distinct associations found.")
+        print(f"{name}:")
+        neighbours = ensemble.neighbours(tokens, top_n)
+        if neighbours is None:
+            print("  Not in vocabulary")
         else:
-            for word, similarity in filtered_results:
-                # Cosine Distance = 1 - Cosine Similarity
-                distance = 1 - similarity
-                label = get_semantic_label(distance)
-                
-                # Formatted output for readability
-                print(f"  - {word:<22} | Dist: {distance:.4f} | Label: [{label}]")
-        
-        print("-" * 80)
+            unknown = [t for t in tokens if t not in ensemble]
+            if unknown:
+                print(f"  Not in vocabulary, ignored: {', '.join(unknown)}")
+            for word, similarity, seeds in neighbours:
+                print(f"  {word:<30} similarity {similarity:.3f}   seeds {seeds}/{len(SEEDS)}")
+        print("-" * 72)
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Political WordEmbedding Query Tool")
-    parser.add_argument("phrase", type=str, help="Phrase to search (e.g., 'Innere Sicherheit')")
-    
+    parser = argparse.ArgumentParser(description="Compare the nearest neighbours of a phrase across the party models")
+    parser.add_argument("phrase", help="word or phrase, e.g. 'Innere Sicherheit'")
+    parser.add_argument("--top", type=int, default=TOP_N, help=f"number of neighbours (default {TOP_N})")
     args = parser.parse_args()
-    run_query(args.phrase)
+    run_query(args.phrase, args.top)

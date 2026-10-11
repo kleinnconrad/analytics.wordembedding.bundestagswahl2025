@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Election Program Embeddings</title>
+<meta name="description" content="Word2Vec models of the 2025 Bundestag election programs of CDU/CSU, Grüne, SPD and AfD: compare the nearest neighbours of political terms across parties.">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --surface-2: #f0efec;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #6f6d68;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --accent: #2a78d6;
+    --accent-ink: #1c5cab;
+    --highlight: rgba(42, 120, 214, 0.12);
+    --party-cdu: #2b2b2b;
+    --party-gruene: #1e9a3c;
+    --party-spd: #e3000f;
+    --party-afd: #0a9bd9;
+    --seq-0: #f0efec;
+    --seq-lo: 205, 226, 251;   /* ramp step 100 */
+    --seq-hi: 16, 66, 129;     /* ramp step 650 */
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --surface-2: #262624;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #9a988f;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --accent: #3987e5;
+      --accent-ink: #86b6ef;
+      --highlight: rgba(57, 135, 229, 0.18);
+      --party-cdu: #bdbdbd;
+      --party-gruene: #46c463;
+      --party-spd: #ff5a5f;
+      --party-afd: #3fb7ec;
+      --seq-0: #262624;
+      --seq-lo: 13, 54, 107;     /* ramp step 700 */
+      --seq-hi: 134, 182, 239;   /* ramp step 250 */
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #262624;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #9a988f;
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --accent: #3987e5;
+    --accent-ink: #86b6ef;
+    --highlight: rgba(57, 135, 229, 0.18);
+    --party-cdu: #bdbdbd;
+    --party-gruene: #46c463;
+    --party-spd: #ff5a5f;
+    --party-afd: #3fb7ec;
+    --seq-0: #262624;
+    --seq-lo: 13, 54, 107;
+    --seq-hi: 134, 182, 239;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  a { color: var(--accent-ink); }
+  a:hover { text-decoration-thickness: 2px; }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+  header.site { padding: 32px 0 8px; }
+  .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  h1 { font-size: 1.75rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.2rem; margin: 0 0 4px; }
+  h3 { font-size: 1rem; margin: 0; }
+  .lede { color: var(--text-secondary); max-width: 760px; margin: 0 0 12px; }
+  .links { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.9rem; margin: 0; padding: 0; list-style: none; }
+  .theme-toggle {
+    flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 10px; cursor: pointer; font-size: 0.85rem; color: var(--text-secondary);
+  }
+
+  section { margin: 24px 0; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .section-head { margin-bottom: 12px; }
+  .section-head p { margin: 0; color: var(--text-secondary); }
+
+  /* Term selection */
+  .search-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .search-row label { font-weight: 600; }
+  #termInput {
+    flex: 1 1 240px; max-width: 360px; padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--baseline); background: var(--surface);
+  }
+  #searchMsg { flex-basis: 100%; margin: 0; color: var(--text-secondary); font-size: 0.9rem; }
+  #searchMsg:empty { display: none; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .chip {
+    border: 1px solid var(--border); background: var(--surface); border-radius: 999px;
+    padding: 3px 11px; cursor: pointer; font-size: 0.85rem; color: var(--text-secondary);
+  }
+  .chip:hover { background: var(--surface-2); }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* Current term */
+  .term-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 20px 0 4px; }
+  .term-head h2 { font-size: 1.5rem; margin: 0; }
+  .term-lemma { color: var(--text-muted); font-family: var(--mono); font-size: 0.9rem; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0 0 12px; padding: 0; list-style: none;
+    color: var(--text-secondary); font-size: 0.85rem;
+  }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .key-bar { display: inline-block; width: 22px; height: 6px; border-radius: 0 3px 3px 0; background: var(--accent); }
+  .key-faded { opacity: 0.5; }
+
+  /* Party columns */
+  .columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 1000px) { .columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .columns { grid-template-columns: minmax(0, 1fr); } }
+  .party {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 14px 10px; border-top: 3px solid var(--party-color);
+  }
+  .party[data-party="cdu"] { --party-color: var(--party-cdu); }
+  .party[data-party="gruene"] { --party-color: var(--party-gruene); }
+  .party[data-party="spd"] { --party-color: var(--party-spd); }
+  .party[data-party="afd"] { --party-color: var(--party-afd); }
+  .party h3 { margin-bottom: 2px; }
+  .party-note { color: var(--text-muted); font-size: 0.8rem; margin: 0 0 8px; min-height: 1.2em; }
+  .nb-list { list-style: none; margin: 0; padding: 0; }
+  .nb {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 3px;
+    padding: 5px 6px; margin: 0 -6px; border-radius: 6px;
+  }
+  .nb.unstable { opacity: 0.5; }
+  .nb.hl { background: var(--highlight); opacity: 1; }
+  .nb-word {
+    min-width: 0; overflow-wrap: anywhere; font-size: 0.92rem; text-align: left;
+    background: none; border: 0; padding: 0; margin: 0;
+  }
+  button.nb-word { cursor: pointer; text-decoration: underline; text-decoration-color: var(--baseline); text-underline-offset: 3px; }
+  button.nb-word:hover { text-decoration-color: currentColor; }
+  .nb-shared {
+    display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 0.72rem;
+    color: var(--text-secondary); border: 1px solid var(--baseline); vertical-align: 1px;
+  }
+  .nb-val { font-variant-numeric: tabular-nums; color: var(--text-secondary); font-size: 0.85rem; }
+  .nb-track { position: relative; height: 6px; align-self: center; }
+  .nb-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 4px 4px 0; background: var(--accent); }
+  .nb-seeds { display: flex; gap: 3px; align-items: center; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--text-secondary); }
+  .dot.on { background: var(--text-secondary); }
+  .empty { color: var(--text-secondary); font-size: 0.9rem; padding: 12px 0; }
+
+  /* Overlap */
+  .overlap { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 24px; margin-top: 12px; align-items: start; }
+  @media (max-width: 760px) { .overlap { grid-template-columns: minmax(0, 1fr); } }
+  .matrix { border-collapse: separate; border-spacing: 2px; font-variant-numeric: tabular-nums; }
+  .matrix th { font-weight: 500; font-size: 0.8rem; color: var(--text-secondary); padding: 4px 6px; }
+  .matrix thead th { text-align: center; }
+  .matrix tbody th { text-align: right; white-space: nowrap; }
+  .matrix td {
+    width: 56px; height: 40px; text-align: center; border-radius: 4px; font-weight: 600; font-size: 0.9rem;
+    cursor: default;
+  }
+  .matrix td.diag { background: transparent; color: var(--text-muted); font-weight: 400; }
+  .matrix td:focus-visible, .matrix td.active { outline: 2px solid var(--text-primary); outline-offset: -2px; }
+  .shared-list { margin: 0; padding: 0; list-style: none; font-size: 0.9rem; }
+  .shared-list li { padding: 4px 0; border-bottom: 1px solid var(--grid); }
+  .shared-list li:last-child { border-bottom: 0; }
+  .shared-list .pair { font-weight: 600; }
+  .shared-list .words { color: var(--text-secondary); }
+  .note { color: var(--text-secondary); font-size: 0.9rem; margin: 8px 0 0; }
+
+  /* Corpus table */
+  .table-scroll { overflow-x: auto; }
+  table.stats { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  table.stats th, table.stats td { padding: 8px 12px; border-bottom: 1px solid var(--grid); text-align: right; }
+  table.stats th:first-child, table.stats td:first-child { text-align: left; }
+  table.stats thead th { color: var(--text-secondary); font-weight: 500; border-bottom-color: var(--baseline); }
+  table.stats td { font-variant-numeric: tabular-nums; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: 0; }
+
+  /* Explainer */
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .tab {
+    border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 7px 14px;
+    cursor: pointer; font-weight: 600; font-size: 0.9rem; color: var(--text-secondary);
+  }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .step-text { max-width: 820px; margin: 0 0 12px; }
+  .step-text code { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
+  svg.diagram { display: block; width: 100%; height: auto; max-height: 440px; }
+  .diagram text { font-family: var(--font); fill: var(--text-primary); font-size: 14px; }
+  .diagram .muted { fill: var(--text-muted); font-size: 12px; }
+  .diagram .mono { font-family: var(--mono); font-size: 13px; }
+  .diagram .box { fill: var(--surface-2); stroke: var(--baseline); stroke-width: 1; }
+  .diagram .box-accent { fill: var(--highlight); stroke: var(--accent); stroke-width: 1.5; }
+  .diagram .cell { fill: var(--accent); }
+  .diagram .cell-dim { fill: var(--baseline); }
+  .diagram .edge { stroke: var(--baseline); stroke-width: 1.5; fill: none; }
+  .diagram .edge-pos { stroke: var(--accent); stroke-width: 2; fill: none; }
+  .diagram .edge-neg { stroke: var(--text-muted); stroke-width: 1.5; fill: none; stroke-dasharray: 2 4; }
+  .diagram .flow { stroke-dasharray: 6 6; animation: flow 1.2s linear infinite; }
+  .diagram .axis { stroke: var(--baseline); stroke-width: 1; }
+  .diagram .vec { stroke-width: 3; stroke-linecap: round; }
+  .diagram .vec-a { stroke: var(--accent); }
+  .diagram .vec-b { stroke: var(--text-primary); }
+  .diagram .arc { fill: var(--highlight); stroke: var(--text-muted); stroke-width: 1; }
+  .diagram .faded { opacity: 0.2; }
+  @keyframes flow { to { stroke-dashoffset: -12; } }
+  @media (prefers-reduced-motion: reduce) { .diagram .flow { animation: none; } }
+
+  .limits { margin: 0; padding-left: 20px; }
+  .limits li { margin-bottom: 6px; }
+  footer { color: var(--text-muted); font-size: 0.85rem; padding: 8px 0 40px; }
+
+  #tooltip {
+    position: fixed; z-index: 10; pointer-events: none; max-width: 280px; padding: 8px 10px;
+    background: var(--surface); color: var(--text-primary); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); font-size: 0.85rem;
+  }
+  #tooltip strong { display: block; font-size: 1rem; }
+  #tooltip[hidden] { display: none; }
+  .error { color: var(--text-primary); background: var(--surface-2); border-radius: 8px; padding: 12px 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="site">
+    <div class="title-row">
+      <div>
+        <h1>Bundestagswahl 2025: election programs as word vectors</h1>
+        <p class="lede">
+          A separate Word2Vec model was trained on each of the four election programs. For a political term,
+          each model returns the words that occur in the most similar contexts in that program.
+          Comparing these neighbours shows in which context each party uses the term.
+        </p>
+      </div>
+      <button class="theme-toggle" id="themeToggle" type="button">Dark mode</button>
+    </div>
+    <ul class="links">
+      <li><a href="https://github.com/kleinnconrad/wordembedding-bundestagswahl-2025">Source code and documentation</a></li>
+      <li><a href="#how-it-works">How it works</a></li>
+      <li><a href="#limitations">Limitations</a></li>
+      <li><a href="https://github.com/kleinnconrad/wordembedding-bundestagswahl-2025/blob/main/results/batch_results.md">All terms as a table</a></li>
+    </ul>
+  </header>
+
+  <main>
+    <section aria-labelledby="compareTitle">
+      <div class="card">
+        <div class="section-head">
+          <h2 id="compareTitle">Compare a term</h2>
+          <p id="compareIntro">Select a preset term or search for a word.</p>
+        </div>
+        <form class="search-row" id="searchForm" role="search">
+          <label for="termInput">Search</label>
+          <input id="termInput" list="termOptions" autocomplete="off" placeholder="e.g. Freiheit, Bürgergeld, Landwirtschaft">
+          <datalist id="termOptions"></datalist>
+          <p id="searchMsg" role="status"></p>
+        </form>
+        <ul class="chips" id="chips" aria-label="Preset terms"></ul>
+
+        <div class="term-head">
+          <h2 id="termTitle">&nbsp;</h2>
+          <span class="term-lemma" id="termLemma"></span>
+        </div>
+        <ul class="legend" id="legend">
+          <li><span class="key-bar" aria-hidden="true"></span><span>Cosine similarity to the term, mean over the seed models (scale 0 to 1)</span></li>
+          <li><span class="nb-seeds" aria-hidden="true"><span class="dot on"></span><span class="dot on"></span><span class="dot"></span></span><span id="legendSeeds">Seed models that rank the word in their own top 10</span></li>
+          <li><span class="key-faded" aria-hidden="true">word</span><span id="legendUnstable">Faded: unstable</span></li>
+          <li><span class="nb-shared" aria-hidden="true">2</span><span>Number of parties with this neighbour</span></li>
+        </ul>
+        <div class="columns" id="columns" aria-live="polite"></div>
+
+        <div class="overlap">
+          <div>
+            <h3>Shared neighbours</h3>
+            <p class="note" id="matrixNote">Number of neighbours that two parties have in common.</p>
+            <table class="matrix" id="matrix"></table>
+          </div>
+          <div>
+            <h3>Which words are shared</h3>
+            <ul class="shared-list" id="sharedList"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="corporaTitle">
+      <div class="card">
+        <div class="section-head">
+          <h2 id="corporaTitle">The corpora</h2>
+          <p>Tokens are the lemmas that remain after removing stop words, punctuation and numbers.
+             The vocabulary contains every lemma with at least <span id="minCount">3</span> occurrences.</p>
+        </div>
+        <div class="table-scroll"><table class="stats" id="statsTable"></table></div>
+        <p class="note" id="agreementNote"></p>
+      </div>
+    </section>
+
+    <section id="how-it-works" aria-labelledby="howTitle">
+      <div class="card">
+        <div class="section-head">
+          <h2 id="howTitle">How it works</h2>
+          <p>Word2Vec skip-gram with negative sampling, as implemented in gensim.</p>
+        </div>
+        <div class="tabs" role="tablist" aria-label="Steps">
+          <button class="tab" role="tab" id="tab1" aria-controls="stepPanel" aria-selected="true">1. Training</button>
+          <button class="tab" role="tab" id="tab2" aria-controls="stepPanel" aria-selected="false">2. Word vector</button>
+          <button class="tab" role="tab" id="tab3" aria-controls="stepPanel" aria-selected="false">3. Cosine similarity</button>
+        </div>
+        <div id="stepPanel" role="tabpanel" aria-labelledby="tab1">
+          <p class="step-text" id="stepText"></p>
+          <svg class="diagram" id="diagram" viewBox="0 0 900 400" role="img" aria-labelledby="stepText"></svg>
+        </div>
+      </div>
+    </section>
+
+    <section id="limitations" aria-labelledby="limitsTitle">
+      <div class="card">
+        <h2 id="limitsTitle">Limitations</h2>
+        <ul class="limits" id="limitsList">
+          <li>Each program has only 12,000 to 23,000 tokens; general-purpose embeddings are trained on billions.
+              The neighbours are indications of how a party uses a term, not proof of intent.</li>
+          <li>Models trained with different random seeds return partly different neighbours. The page therefore
+              averages over several seed models and marks neighbours that only some of them return.</li>
+          <li>Similarity values are comparable within a party. Across parties, compare the neighbours,
+              not the exact values: each model has its own vector space.</li>
+          <li>Similarity means "used in similar contexts". Opposites (e.g. "erhöhen" and "senken") often
+              have high similarity.</li>
+          <li>Lemmatization by spaCy's small German model contains errors, e.g. "Lehrerinnen" becomes "lehrerinne".</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Data: election programs of CDU/CSU, Bündnis 90/Die Grünen, SPD and AfD for the Bundestag election on
+    23 February 2025. Code and models under the MIT license on
+    <a href="https://github.com/kleinnconrad/wordembedding-bundestagswahl-2025">GitHub</a>.
+  </footer>
+</div>
+<div id="tooltip" role="tooltip" hidden></div>
+
+<script>
+"use strict";
+
+// Real training example from the CDU/CSU program, preprocessed by src/textproc.py.
+// The negative samples were drawn from the CDU/CSU vocabulary (word count ^ 0.75, as in gensim).
+const EXAMPLE = {
+  party: "CDU/CSU",
+  sentence: "Sie garantiert der Bundesrepublik seit mehr als 75 Jahren Frieden, Freiheit und Sicherheit.",
+  tokens: ["garantieren", "bundesrepublik", "frieden", "freiheit", "sicherheit"],
+  input: "sicherheit",
+  context: ["garantieren", "bundesrepublik", "frieden", "freiheit"],
+  negatives: ["eigentum", "information", "anliegen"],
+};
+
+const $ = (id) => document.getElementById(id);
+const SVG_NS = "http://www.w3.org/2000/svg";
+let data = null;
+let parties = [];
+let currentKey = null;
+let currentStep = 1;
+const buzzwordByKey = new Map();
+const labelToKey = new Map();
+
+/* ---------- theme ---------- */
+function storedTheme() {
+  try { return localStorage.getItem("theme"); } catch (e) { return null; }
+}
+function effectiveDark() {
+  const t = document.documentElement.getAttribute("data-theme");
+  if (t) return t === "dark";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+function updateThemeButton() {
+  $("themeToggle").textContent = effectiveDark() ? "Light mode" : "Dark mode";
+}
+(function initTheme() {
+  const t = storedTheme();
+  if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+  updateThemeButton();
+  $("themeToggle").addEventListener("click", () => {
+    const next = effectiveDark() ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch (e) { /* storage unavailable */ }
+    updateThemeButton();
+    if (data) renderMatrix(currentKey);
+  });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    updateThemeButton();
+    if (data) renderMatrix(currentKey);
+  });
+})();
+
+/* ---------- helpers ---------- */
+function el(tag, attrs, text) {
+  const node = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function svg(tag, attrs, text) {
+  const node = document.createElementNS(SVG_NS, tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+const fmt = (n) => n.toLocaleString("en-US");
+const seedsTotal = () => data.seeds.length;
+
+const tooltip = $("tooltip");
+function showTooltip(target, title, body) {
+  tooltip.replaceChildren(el("strong", null, title), el("span", null, body));
+  tooltip.hidden = false;
+  const r = target.getBoundingClientRect();
+  const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+  let x = r.left + r.width / 2 - tw / 2;
+  x = Math.max(8, Math.min(x, window.innerWidth - tw - 8));
+  let y = r.top - th - 8;
+  if (y < 8) y = r.bottom + 8;
+  tooltip.style.left = x + "px";
+  tooltip.style.top = y + "px";
+}
+function hideTooltip() { tooltip.hidden = true; }
+
+/* ---------- term selection ---------- */
+function termLabel(key) {
+  const b = buzzwordByKey.get(key);
+  return b ? b.label : key;
+}
+
+function buildControls() {
+  const chips = $("chips");
+  for (const b of data.buzzwords) {
+    const li = el("li");
+    const btn = el("button", { type: "button", class: "chip", "data-key": b.key, "aria-pressed": "false" }, b.label);
+    btn.addEventListener("click", () => selectTerm(b.key, true));
+    li.append(btn);
+    chips.append(li);
+  }
+  const options = $("termOptions");
+  const seen = new Set();
+  for (const b of data.buzzwords) { options.append(el("option", { value: b.label })); seen.add(b.label.toLowerCase()); }
+  for (const key of Object.keys(data.terms).sort((a, b) => a.localeCompare(b, "de"))) {
+    if (!seen.has(key)) options.append(el("option", { value: key }));
+  }
+  $("searchForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    findTerm($("termInput").value);
+  });
+  $("termInput").addEventListener("change", () => findTerm($("termInput").value, true));
+}
+
+function findTerm(raw, quiet) {
+  const query = raw.trim().toLowerCase();
+  if (!query) return;
+  const key = labelToKey.get(query) || (data.terms[query] ? query : null);
+  if (key) {
+    $("searchMsg").textContent = "";
+    selectTerm(key, true);
+  } else if (!quiet) {
+    $("searchMsg").textContent =
+      `No precomputed results for "${raw.trim()}". The page covers the ${data.buzzwords.length} preset terms and the ` +
+      `${fmt(data.shared_vocabulary)} lemmas that occur at least ${data.parameters.min_count} times in all four programs ` +
+      `(search for the lemma, e.g. "steuer" instead of "Steuern"). Other words: src/query_tool.py.`;
+  }
+}
+
+function selectTerm(key, updateHash) {
+  if (!data.terms[key]) return;
+  currentKey = key;
+  if (updateHash) history.replaceState(null, "", "#term=" + encodeURIComponent(key));
+  document.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c.dataset.key === key)));
+  $("termTitle").textContent = termLabel(key);
+  $("termLemma").textContent = buzzwordByKey.has(key) ? "lemma: " + key : "";
+  renderColumns(key);
+  renderMatrix(key);
+  if (currentStep === 3) renderStep(3);
+}
+
+function keyFromHash() {
+  const m = location.hash.match(/^#term=(.+)$/);
+  if (!m) return null;
+  const key = decodeURIComponent(m[1]);
+  return data.terms[key] ? key : null;
+}
+
+/* ---------- party columns ---------- */
+function neighbourCounts(entry) {
+  const counts = new Map();
+  for (const p of parties) {
+    for (const [word] of entry[p.id] || []) counts.set(word, (counts.get(word) || 0) + 1);
+  }
+  return counts;
+}
+
+function highlightWords(words) {
+  document.querySelectorAll(".nb").forEach((row) => row.classList.toggle("hl", words.has(row.dataset.word)));
+}
+
+function renderColumns(key) {
+  const entry = data.terms[key];
+  const counts = neighbourCounts(entry);
+  const unknown = (buzzwordByKey.get(key) || {}).unknown || {};
+  const total = seedsTotal();
+  const columns = $("columns");
+  columns.replaceChildren();
+
+  for (const p of parties) {
+    const col = el("article", { class: "party", "data-party": p.id });
+    col.append(el("h3", null, p.name));
+    const list = entry[p.id];
+    let note = "";
+    if (list && unknown[p.id]) note = `Not in vocabulary, ignored: ${unknown[p.id].join(", ")}`;
+    col.append(el("p", { class: "party-note" }, note));
+
+    if (!list) {
+      col.append(el("p", { class: "empty" },
+        `Not in the vocabulary: fewer than ${data.parameters.min_count} occurrences in this program.`));
+      columns.append(col);
+      continue;
+    }
+
+    const ol = el("ol", { class: "nb-list" });
+    for (const [word, sim, seeds] of list) {
+      const li = el("li", { class: "nb" + (seeds < data.stable_seeds ? " unstable" : ""), "data-word": word });
+      const wordCell = el("div", { class: "nb-word-cell" });
+      let wordNode;
+      if (data.terms[word] && word !== key) {
+        wordNode = el("button", { type: "button", class: "nb-word", title: `Show the neighbours of "${word}"` }, word);
+        wordNode.addEventListener("click", () => { selectTerm(word, true); $("compareTitle").scrollIntoView({ behavior: "smooth" }); });
+      } else {
+        wordNode = el("span", { class: "nb-word" }, word);
+      }
+      wordCell.append(wordNode);
+      const shared = counts.get(word);
+      if (shared > 1) wordCell.append(el("span", { class: "nb-shared", title: `Neighbour in ${shared} of 4 programs` }, String(shared)));
+      li.append(wordCell);
+      li.append(el("span", { class: "nb-val" }, sim.toFixed(2)));
+
+      const track = el("div", { class: "nb-track", "aria-hidden": "true" });
+      const fill = el("div", { class: "nb-fill" });
+      fill.style.width = (Math.max(0, sim) * 100).toFixed(1) + "%";
+      track.append(fill);
+      li.append(track);
+
+      const dots = el("span", {
+        class: "nb-seeds", role: "img",
+        "aria-label": `in the top ${data.top_n} of ${seeds} of ${total} seed models`,
+        title: `In the top ${data.top_n} of ${seeds} of ${total} seed models`,
+      });
+      for (let i = 0; i < total; i++) dots.append(el("span", { class: "dot" + (i < seeds ? " on" : "") }));
+      li.append(dots);
+
+      li.addEventListener("pointerenter", () => highlightWords(new Set([word])));
+      li.addEventListener("pointerleave", () => highlightWords(new Set()));
+      li.addEventListener("focusin", () => highlightWords(new Set([word])));
+      li.addEventListener("focusout", () => highlightWords(new Set()));
+      ol.append(li);
+    }
+    col.append(ol);
+    columns.append(col);
+  }
+}
+
+/* ---------- overlap matrix ---------- */
+function sharedWords(entry, a, b) {
+  if (!entry[a] || !entry[b]) return null;
+  const other = new Set(entry[b].map((n) => n[0]));
+  return entry[a].map((n) => n[0]).filter((w) => other.has(w));
+}
+
+function cellColor(count) {
+  if (count === 0) return { bg: "var(--seq-0)", ink: "var(--text-secondary)" };
+  const style = getComputedStyle(document.documentElement);
+  const lo = style.getPropertyValue("--seq-lo").split(",").map(Number);
+  const hi = style.getPropertyValue("--seq-hi").split(",").map(Number);
+  const t = Math.min(1, (count - 1) / Math.max(1, data.top_n - 1));
+  const rgb = lo.map((v, i) => Math.round(v + (hi[i] - v) * t));
+  const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+  return { bg: `rgb(${rgb.join(",")})`, ink: lum > 0.55 ? "#0b0b0b" : "#ffffff" };
+}
+
+function renderMatrix(key) {
+  const entry = data.terms[key];
+  const table = $("matrix");
+  table.replaceChildren();
+  const head = el("tr");
+  head.append(el("td"));
+  for (const p of parties) head.append(el("th", { scope: "col" }, p.name));
+  const thead = el("thead");
+  thead.append(head);
+  table.append(thead);
+  const body = el("tbody");
+  const pairs = [];
+
+  parties.forEach((row, i) => {
+    const tr = el("tr");
+    tr.append(el("th", { scope: "row" }, row.name));
+    parties.forEach((col, j) => {
+      if (i === j) { tr.append(el("td", { class: "diag" }, "–")); return; }
+      const words = sharedWords(entry, row.id, col.id);
+      if (words === null) {
+        const td = el("td", { class: "diag", title: "Term not in both vocabularies" }, "n/a");
+        tr.append(td);
+        return;
+      }
+      if (i < j) pairs.push({ a: row, b: col, words });
+      const { bg, ink } = cellColor(words.length);
+      const td = el("td", { tabindex: "0" }, String(words.length));
+      td.style.background = bg;
+      td.style.color = ink;
+      const label = `${row.name} and ${col.name}`;
+      const body = words.length ? words.join(", ") : "No shared neighbours";
+      td.setAttribute("aria-label", `${label}: ${words.length} shared neighbours. ${body}`);
+      const enter = () => { td.classList.add("active"); highlightWords(new Set(words)); showTooltip(td, `${words.length} of ${data.top_n} shared`, `${label}: ${body}`); };
+      const leave = () => { td.classList.remove("active"); highlightWords(new Set()); hideTooltip(); };
+      td.addEventListener("pointerenter", enter);
+      td.addEventListener("pointerleave", leave);
+      td.addEventListener("focus", enter);
+      td.addEventListener("blur", leave);
+      tr.append(td);
+    });
+    body.append(tr);
+  });
+  table.append(body);
+
+  const list = $("sharedList");
+  list.replaceChildren();
+  const withShared = pairs.filter((p) => p.words.length).sort((x, y) => y.words.length - x.words.length);
+  if (!withShared.length) {
+    list.append(el("li", { class: "words" }, pairs.length ? "No neighbour appears in two parties' lists." : "Not enough data for this term."));
+  }
+  for (const p of withShared) {
+    const li = el("li");
+    li.append(el("span", { class: "pair" }, `${p.a.name} & ${p.b.name}: `));
+    li.append(el("span", { class: "words" }, p.words.join(", ")));
+    list.append(li);
+  }
+}
+
+/* ---------- corpus table ---------- */
+function buildStats() {
+  const table = $("statsTable");
+  const head = el("tr");
+  for (const h of ["Party", "Sentences", "Tokens", "Vocabulary", "Seed agreement"]) head.append(el("th", { scope: "col" }, h));
+  const thead = el("thead");
+  thead.append(head);
+  table.append(thead);
+  const body = el("tbody");
+  for (const p of parties) {
+    const tr = el("tr");
+    const name = el("td");
+    const sw = el("span", { class: "swatch", "aria-hidden": "true" });
+    sw.style.background = `var(--party-${p.id})`;
+    name.append(sw, document.createTextNode(p.name));
+    tr.append(name, el("td", null, fmt(p.sentences)), el("td", null, fmt(p.tokens)),
+      el("td", null, fmt(p.vocabulary)), el("td", null, Math.round(p.seed_agreement * 100) + " %"));
+    body.append(tr);
+  }
+  table.append(body);
+  $("minCount").textContent = data.parameters.min_count;
+  const params = data.parameters;
+  $("agreementNote").textContent =
+    `Seed agreement: share of the top ${data.top_n} neighbours that two single models of the same party, trained with ` +
+    `different random seeds, have in common (mean over the ${fmt(data.shared_vocabulary)} lemmas of all four vocabularies). ` +
+    `All models: skip-gram, ${params.vector_size} dimensions, window ${params.window}, ${params.negative} negative samples, ` +
+    `${params.epochs} epochs, ${data.seeds.length} seeds per party.`;
+}
+
+/* ---------- explainer ---------- */
+function stepTexts() {
+  const d = data.parameters.vector_size;
+  return {
+    1: `Training: the sentence "${EXAMPLE.sentence}" (${EXAMPLE.party}) becomes the tokens ` +
+       `${EXAMPLE.tokens.join(", ")} after lemmatization and removal of stop words and numbers. ` +
+       `For each token (here "${EXAMPLE.input}") the model predicts the other tokens up to ${data.parameters.window} positions ` +
+       `away (y = 1) and ${data.parameters.negative} randomly drawn words (y = 0, negative samples; 3 shown). ` +
+       `The input word's row of the matrix W is its ${d}-dimensional vector h. Each prediction is σ(h · w′), the sigmoid ` +
+       `of the dot product with the output vector w′ of the other word. Gradient descent reduces the loss L and updates ` +
+       `W and W′. This is repeated for every token, ${data.parameters.epochs} times over the whole program.`,
+    2: `Word vector: after training, the output matrix W′ is discarded. The row of W for "${EXAMPLE.input}" ` +
+       `(${d} numbers) is its word vector. Words that are predicted from similar contexts end up with similar rows.`,
+    3: "",
+  };
+}
+
+function setStep(step) {
+  currentStep = step;
+  for (let i = 1; i <= 3; i++) {
+    const tab = $("tab" + i);
+    tab.setAttribute("aria-selected", String(i === step));
+    tab.tabIndex = i === step ? 0 : -1;
+  }
+  $("stepPanel").setAttribute("aria-labelledby", "tab" + step);
+  renderStep(step);
+}
+
+function renderStep(step) {
+  const g = $("diagram");
+  g.replaceChildren();
+  if (step === 3) return renderCosine(g);
+  $("stepText").textContent = stepTexts()[step];
+  renderNetwork(g, step === 2);
+}
+
+function renderNetwork(g, extracted) {
+  const d = data.parameters.vector_size;
+  // Input word
+  g.append(svg("rect", { x: 20, y: 160, width: 150, height: 44, rx: 8, class: extracted ? "box-accent" : "box" }));
+  g.append(svg("text", { x: 95, y: 187, "text-anchor": "middle", class: "mono" }, EXAMPLE.input));
+  g.append(svg("text", { x: 95, y: 226, "text-anchor": "middle", class: "muted" }, "input word"));
+
+  // Embedding row h = W[input]
+  const cells = 12, cw = 18, ch = 18, hx = 300, hy = 182 - (cells * ch) / 2;
+  g.append(svg("line", { x1: 170, y1: 182, x2: hx - 12, y2: 182, class: extracted ? "edge-pos" : "edge" }));
+  if (extracted) g.append(svg("rect", { x: hx - 10, y: hy - 10, width: cw + 20, height: cells * ch + 20, rx: 8, class: "box-accent" }));
+  for (let i = 0; i < cells; i++) {
+    const isGap = i === cells - 3;
+    if (isGap) {
+      g.append(svg("text", { x: hx + cw / 2, y: hy + i * ch + 14, "text-anchor": "middle", class: "muted" }, "⋮"));
+      continue;
+    }
+    g.append(svg("rect", { x: hx, y: hy + i * ch + 2, width: cw, height: ch - 4, rx: 3, class: "cell", opacity: 0.35 + ((i * 37) % 60) / 100 }));
+  }
+  g.append(svg("text", { x: hx + cw / 2, y: hy - 22, "text-anchor": "middle" }, "h = W[" + EXAMPLE.input + "]"));
+  g.append(svg("text", { x: hx + cw / 2, y: hy + cells * ch + 26, "text-anchor": "middle", class: "muted" }, d + " dimensions"));
+
+  // Output words
+  const outputs = [
+    ...EXAMPLE.context.map((w) => ({ w, y: 1 })),
+    ...EXAMPLE.negatives.map((w) => ({ w, y: 0 })),
+  ];
+  const ox = 620, top = 40, gap = Math.min(42, 300 / Math.max(1, outputs.length - 1));
+  const out = svg("g", { class: extracted ? "faded" : "" });
+  const spread = (cells * ch - 24) / Math.max(1, outputs.length - 1);
+  outputs.forEach((o, i) => {
+    const y = top + i * gap;
+    const startY = hy + 12 + i * spread;
+    const cls = (o.y ? "edge-pos" : "edge-neg") + (extracted ? "" : " flow");
+    out.append(svg("path", { d: `M ${hx + cw + 4} ${startY} C ${hx + 160} ${startY}, ${ox - 160} ${y}, ${ox - 8} ${y}`, class: cls }));
+    out.append(svg("circle", { cx: ox, cy: y, r: 6, fill: o.y ? "var(--accent)" : "var(--surface)", stroke: o.y ? "var(--accent)" : "var(--text-muted)", "stroke-width": 1.5 }));
+    out.append(svg("text", { x: ox + 14, y: y + 5, class: "mono" }, o.w));
+    out.append(svg("text", { x: ox + 150, y: y + 5, class: "muted" }, o.y ? "y = 1" : "y = 0"));
+  });
+  out.append(svg("text", { x: ox - 8, y: 18, class: "muted" }, "σ(h · w′) for each output word"));
+  const lossY = top + outputs.length * gap + 18;
+  out.append(svg("text", { x: ox - 8, y: lossY, class: "mono" }, "L = −log σ(h · w′)    for y = 1"));
+  out.append(svg("text", { x: ox - 8, y: lossY + 20, class: "mono" }, "  + −log σ(−h · w′)   for y = 0"));
+  out.append(svg("text", { x: ox - 8, y: lossY + 42, class: "muted" }, "gradient descent updates W and W′"));
+  g.append(out);
+}
+
+function renderCosine(g) {
+  const entry = data.terms[currentKey];
+  const party = parties.find((p) => entry[p.id] && entry[p.id].length);
+  if (!party) {
+    $("stepText").textContent = "Select a term that is in at least one vocabulary to see its cosine similarity.";
+    return;
+  }
+  const [word, sim] = entry[party.id][0];
+  const theta = Math.acos(Math.max(-1, Math.min(1, sim)));
+  const deg = Math.round((theta * 180) / Math.PI);
+  $("stepText").textContent =
+    `Cosine similarity: two word vectors are compared by the angle θ between them, cos θ = (a · b) / (|a| |b|). ` +
+    `The length of the vectors does not matter. In the ${party.name} model, "${termLabel(currentKey)}" and its nearest neighbour ` +
+    `"${word}" have a mean similarity of ${sim.toFixed(2)}, which corresponds to θ = ${deg}°. The diagram shows this angle ` +
+    `in two dimensions; the vectors themselves have ${data.parameters.vector_size}. Cosine distance = 1 − cos θ = ${(1 - sim).toFixed(2)}.`;
+
+  const ox = 140, oy = 330, len = 330, base = (12 * Math.PI) / 180;
+  const ax = ox + len * Math.cos(base), ay = oy - len * Math.sin(base);
+  const bx = ox + len * Math.cos(base + theta), by = oy - len * Math.sin(base + theta);
+  g.append(svg("line", { x1: ox, y1: oy, x2: 860, y2: oy, class: "axis" }));
+  g.append(svg("line", { x1: ox, y1: oy, x2: ox, y2: 20, class: "axis" }));
+  const r = 90;
+  const sx = ox + r * Math.cos(base), sy = oy - r * Math.sin(base);
+  const ex = ox + r * Math.cos(base + theta), ey = oy - r * Math.sin(base + theta);
+  g.append(svg("path", { d: `M ${ox} ${oy} L ${sx} ${sy} A ${r} ${r} 0 ${theta > Math.PI ? 1 : 0} 0 ${ex} ${ey} Z`, class: "arc" }));
+  const mid = base + theta / 2;
+  g.append(svg("text", { x: ox + (r + 18) * Math.cos(mid), y: oy - (r + 18) * Math.sin(mid) + 5, "text-anchor": "middle" }, `θ = ${deg}°`));
+  g.append(svg("line", { x1: ox, y1: oy, x2: ax, y2: ay, class: "vec vec-a" }));
+  g.append(svg("line", { x1: ox, y1: oy, x2: bx, y2: by, class: "vec vec-b" }));
+  g.append(svg("circle", { cx: ax, cy: ay, r: 5, fill: "var(--accent)" }));
+  g.append(svg("circle", { cx: bx, cy: by, r: 5, fill: "var(--text-primary)" }));
+  g.append(svg("text", { x: ax + 12, y: ay + 5, class: "mono" }, currentKey));
+  g.append(svg("text", { x: bx + 12, y: by + 5, class: "mono" }, word));
+  g.append(svg("text", { x: 560, y: 372, class: "muted" }, `cos θ = ${sim.toFixed(2)}   ·   ${party.name} model`));
+}
+
+function buildExplainer() {
+  for (let i = 1; i <= 3; i++) $("tab" + i).addEventListener("click", () => setStep(i));
+  $("stepPanel").parentElement.querySelector(".tabs").addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const next = ((currentStep - 1 + (e.key === "ArrowRight" ? 1 : 2)) % 3) + 1;
+    setStep(next);
+    $("tab" + next).focus();
+  });
+  setStep(1);
+}
+
+/* ---------- init ---------- */
+async function init() {
+  try {
+    const response = await fetch("results/results.json");
+    if (!response.ok) throw new Error(response.status + " " + response.statusText);
+    data = await response.json();
+  } catch (err) {
+    const msg = el("p", { class: "error" },
+      "The results could not be loaded (" + err.message + "). Open the page through a web server, " +
+      "e.g. GitHub Pages or `python -m http.server`, not as a local file.");
+    $("columns").replaceWith(msg);
+    return;
+  }
+  parties = data.parties;
+  for (const b of data.buzzwords) {
+    buzzwordByKey.set(b.key, b);
+    labelToKey.set(b.label.toLowerCase(), b.key);
+  }
+  const total = data.seeds.length;
+  $("legendSeeds").textContent = `Seed models (of ${total}) that rank the word in their own top ${data.top_n}`;
+  $("legendUnstable").textContent = `Faded: fewer than ${data.stable_seeds} of ${total} seed models, unstable`;
+  $("compareIntro").textContent =
+    `Select one of ${data.buzzwords.length} preset terms or search among the ${fmt(data.shared_vocabulary)} lemmas that all four ` +
+    `programs use. Click a neighbour to show its own neighbours.`;
+  $("matrixNote").textContent = `Number of the top ${data.top_n} neighbours that two parties have in common.`;
+  buildControls();
+  buildStats();
+  selectTerm(keyFromHash() || data.buzzwords[0].key, false);
+  buildExplainer();
+  window.addEventListener("hashchange", () => { const k = keyFromHash(); if (k && k !== currentKey) selectTerm(k, false); });
+}
+init();
+</script>
+</body>
+</html>

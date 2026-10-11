@@ -1,0 +1,14 @@
+[project]
+name = "wordembedding-bundestagswahl-2025"
+version = "0.1.0"
+description = "Word2Vec embeddings of the 2025 Bundestagswahl election programs"
+readme = "readme.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "de-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl",
+    "gensim==4.4.0",
+    "numpy==2.5.3",
+    "pdfplumber==0.11.10",
+    "scipy>=1.18.1",
+    "spacy==3.8.16",
+]
