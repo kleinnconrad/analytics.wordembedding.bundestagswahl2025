@@ -7,7 +7,7 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "de-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl",
     "gensim==4.4.0",
-    "numpy==2.5.3",
+    "numpy==2.5.4",
     "pdfplumber==0.11.10",
     "scipy>=1.18.1",
     "spacy==3.8.16",
