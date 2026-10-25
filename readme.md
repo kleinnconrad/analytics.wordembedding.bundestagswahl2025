@@ -2,7 +2,7 @@
 
 This repository implements a comparative NLP pipeline for the election programs of CDU/CSU, Grüne, SPD and AfD for the 2025 Bundestag election. A separate Word2Vec model is trained on each program. For a political term, each model returns the words that occur in the most similar contexts in that program, which shows in which context each party uses the term.
 
-[![Dashboard](https://img.shields.io/badge/Open-Interactive_Dashboard-2ea44f?style=for-the-badge&logo=html5)](https://kleinnconrad.github.io/wordembedding-bundestagswahl-2025/)
+[![Dashboard](https://img.shields.io/badge/Open-Interactive_Dashboard-2ea44f?style=for-the-badge&logo=html5)](https://kleinnconrad.github.io/analytics.wordembedding.bundestagswahl2025/)
 
 The dashboard compares the nearest neighbours of 30 preset terms and of every lemma that occurs at least three times in all four programs, and explains the model step by step. The motivation is described in [docs/intro_doc.md](docs/intro_doc.md).
 
@@ -141,7 +141,7 @@ The values are comparable within one party's model. Across parties, the neighbou
 ---
 
 ## Results
-The full results are in the [dashboard](https://kleinnconrad.github.io/wordembedding-bundestagswahl-2025/) and in [`results/batch_results.md`](results/batch_results.md). The five nearest neighbours of four of the 30 terms:
+The full results are in the [dashboard](https://kleinnconrad.github.io/analytics.wordembedding.bundestagswahl2025/) and in [`results/batch_results.md`](results/batch_results.md). The five nearest neighbours of four of the 30 terms:
 
 | Term | CDU/CSU | Grüne | SPD | AfD |
 | :--- | :--- | :--- | :--- | :--- |
